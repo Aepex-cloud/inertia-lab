@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>惯性实验室 | 转动惯量交互式演示</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+body{background:#0f141c;color:#e6edf3;padding:16px;max-width:1200px;margin:0 auto}
+h1{text-align:center;margin-bottom:8px;font-size:24px}
+.subtitle{text-align:center;color:#8b949e;margin-bottom:20px}
+.wrap{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+@media(max-width:800px){.wrap{grid-template-columns:1fr}}
+.card{background:#161b22;border:1px solid #30363d;border-radius:12px;padding:16px}
+canvas{width:100%;touch-action:none}
+.ctrl{margin-top:12px;display:grid;gap:10px}
+.row{display:flex;align-items:center;gap:8px}
+label{width:90px;font-size:14px;color:#c9d1d9}
+input[type="range"]{flex:1}
+.val{width:50px;text-align:right;font-family:monospace}
+select{background:#21262d;color:#e6edf3;border:1px solid #30363d;padding:6px;border-radius:6px}
+button{background:#238636;color:white;border:none;padding:7px 12px;border-radius:6px;cursor:pointer}
+button:hover{background:#2ea043}
+.info{margin-top:12px;padding:10px;background:#21262d;border-radius:8px;font-family:monospace;font-size:14px;line-height:1.6}
+.formula{text-align:center;font-size:16px;margin:8px 0;color:#79c0ff}
+.foot{margin-top:20px;text-align:center;color:#8b949e;font-size:13px}
+</style>
+</head>
+<body>
+<h1>惯性实验室</h1>
+<div class="subtitle">转动惯量交互式可视化 · 拖拽旋转模型</div>
+<div class="wrap">
+<div class="card">
+<canvas id="cv"></canvas>
+<div class="ctrl">
+<div class="row"><label>模型</label><select id="mdl">
+<option value="shell">薄球壳 I=2/3 MR²</option>
+<option value="sphere">实心球 I=2/5 MR²</option>
+<option value="rod">细杆(中心) I=1/12 ML²</option>
+<option value="disk">圆盘 I=1/2 MR²</option>
+<option value="ring">圆环 I=MR²</option>
+</select></div>
+<div class="row"><label>质量 M</label><input type="range" id="M" min="0.2" max="5" step="0.1" value="1"><span class="val" id="Mv">1.00</span></div>
+<div class="row"><label>半径 R</label><input type="range" id="R" min="0.2" max="3" step="0.1" value="1"><span class="val" id="Rv">1.00</span></div>
+<div class="row"><label>视角</label><input type="range" id="zoom" min="0.5" max="2.5" step="0.05" value="1.2"><span class="val" id="zv">1.20</span></div>
+<div class="row"><button id="autospin">暂停自转</button><button id="copy">复制参数链接</button></div>
+</div>
+<div class="info">
+转动惯量：<div class="formula" id="form">I = 0.667 M R²</div>
+数值 I = <span id="ival">0.667</span>
+</div>
+</div>
+<div class="card">
+<canvas id="chart"></canvas>
+<div class="info">
+横轴：半径 R；纵轴：I(R)，固定质量M
+</div>
+</div>
+</div>
+<div class="foot">拖拽3D模型旋转 · 双指缩放 · 切换模型对比转动惯量公式</div>
+<script>
+const $=s=>document.querySelector(s);
+const $$=s=>document.querySelectorAll(s);
+const cv=$("#cv"),ctx=cv.getContext("2d");
+const chart=$("#chart"),cxt=chart.getContext("2d");
+const mdlSel=$("#mdl"),Msl=$("#M"),Rsl=$("#R"),zsl=$("#zoom");
+const Mv=$("#Mv"),Rv=$("#Rv"),zv=$("#zv"),form=$("#form"),ival=$("#ival"),spinBtn=$("#autospin"),copyBtn=$("#copy");
+let w,h,cw,ch;
+let mx=0,my=0,autospin=true;
+let drag=false,lx=0,ly=0;
+function resize(){
+cw=cv.clientWidth;ch=cv.clientHeight;
+cv.width=cw;cv.height=ch;
+chart.width=cw;chart.height=ch;
+draw();drawChart();
+}
+window.addEventListener("resize",resize);
+function getI(mode,M,R){
+switch(mode){
+case"shell":return {k:2/3,f:"I=\\dfrac{2}{3}MR^2"};
+case"sphere":return {k:2/5,f:"I=\\dfrac{2}{5}MR^2"};
+case"rod":return {k:1/12,f:"I=\\dfrac{1}{12}ML^2"};
+case"disk":return {k:1/2,f:"I=\\dfrac{1}{2}MR^2"};
+case"ring":return {k:1,f:"I=MR^2"};
+default:return {k:1,f:"MR²"};
+}
+}
+function draw(){
+const mode=mdlSel.value;
+const M=+Msl.value,R=+Rsl.value,zoom=+zsl.value;
+const {k,f}=getI(mode,M,R);
+const I=k*M*R*R;
+Mv.textContent=M.toFixed(2);
+Rv.textContent=R.toFixed(2);
+zv.textContent=zoom.toFixed(2);
+form.innerHTML=f;
+ival.textContent=I.toFixed(3);
+ctx.clearRect(0,0,cw,ch);
+const cx=cw/2,cy=ch/2;
+const sc=zoom*40;
+ctx.save();
+ctx.translate(cx,cy);
+ctx.rotate(mx);
+const sa=Math.sin(my),ca=Math.cos(my);
+ctx.strokeStyle="#58a6ff";
+ctx.lineWidth=1.5;
+// 球
+ctx.beginPath();
+for(let th=0;th<Math.PI*2;th+=0.04){
+const x=R*sc*Math.cos(th);
+const y=R*sc*Math.sin(th)*ca;
+ctx.lineTo(x,y);
+}
+ctx.closePath();ctx.stroke();
+// 经纬线
+ctx.strokeStyle="#388bff88";
+for(let ph=-Math.PI/2;ph<=Math.PI/2;ph+=Math.PI/4){
+ctx.beginPath();
+for(let th=0;th<Math.PI*2;th+=0.04){
+const x=R*sc*Math.cos(th)*Math.cos(ph);
+const y=R*sc*Math.sin(ph)*ca;
+ctx.lineTo(x,y);
+}
+ctx.stroke();
+}
+ctx.strokeStyle="#7ee787";
+ctx.beginPath();
+ctx.moveTo(-R*sc*ca,0);ctx.lineTo(R*sc*ca,0);
+ctx.moveTo(0,-R*sc);ctx.lineTo(0,R*sc);
+ctx.stroke();
+ctx.restore();
+}
+function drawChart(){
+cxt.clearRect(0,0,cw,ch);
+const M=+Msl.value;
+const pad=30;
+const x0=pad,y0=ch-pad,x1=cw-pad,y1=pad;
+cxt.strokeStyle="#484f58";
+cxt.beginPath();cxt.moveTo(x0,y0);cxt.lineTo(x1,y0);cxt.moveTo(x0,y0);cxt.lineTo(x0,y1);cxt.stroke();
+const modes=[
+{n:"薄球壳",k:2/3,c:"#58a6ff"},
+{n:"实心球",k:2/5,c:"#7ee787"},
+{n:"细杆",k:1/12,c:"#f0883e"},
+{n:"圆盘",k:1/2,c:"#bc8cff"},
+{n:"圆环",k:1,c:"#f778ba"}
+];
+const Rmax=3;
+for(const m of modes){
+cxt.strokeStyle=m.c;
+cxt.beginPath();
+for(let t=0;t<=1;t+=0.01){
+const r=Rmax*t;
+const I=m.k*M*r*r;
+const xx=x0 + t*(x1-x0);
+const yy=y0 - I/(m.k*M*Rmax*Rmax)*(y0-y1);
+cxt.lineTo(xx,yy);
+}
+cxt.stroke();
+}
+}
+// drag
+cv.addEventListener("pointerdown",e=>{drag=true;lx=e.clientX;ly=e.clientY;cv.setPointerCapture(e.pointerId)});
+cv.addEventListener("pointermove",e=>{
+if(!drag)return;
+const dx=e.clientX-lx,dy=e.clientY-ly;
+mx+=dx*0.01;
+my+=dy*0.01;
+lx=e.clientX;ly=e.clientY;
+draw();
+});
+cv.addEventListener("pointerup",e=>{drag=false;cv.releasePointerCapture(e.pointerId)});
+cv.addEventListener("pointercancel",e=>{drag=false});
+// auto spin
+spinBtn.onclick=()=>{
+autospin=!autospin;
+spinBtn.textContent=autospin?"暂停自转":"开启自转";
+};
+copyBtn.onclick=()=>{
+const u=new URL(location.href);
+u.searchParams.set("m",mdlSel.value);
+u.searchParams.set("M",Msl.value);
+u.searchParams.set("R",Rsl.value);
+u.searchParams.set("z",zsl.value);
+navigator.clipboard.writeText(u.toString()).then(()=>alert("链接已复制"));
+};
+function anim(){
+if(autospin&&!drag){
+mx+=0.008;
+draw();
+}
+requestAnimationFrame(anim);
+}
+[mdlSel,Msl,Rsl,zsl].forEach(el=>el.oninput=()=>{draw();drawChart();});
+// load url params
+const p=new URLSearchParams(location.search);
+if(p.has("m"))mdlSel.value=p.get("m");
+if(p.has("M"))Msl.value=+p.get("M");
+if(p.has("R"))Rsl.value=+p.get("R");
+if(p.has("z"))zsl.value=+p.get("z");
+resize();
+anim();
+</script>
+</body>
+</html>
